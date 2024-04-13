@@ -16,59 +16,104 @@
 
 #define REPORTID_KBLIGHT       0x01
 
-//
-// Feature report infomation
-//
+enum {
+	REPORT_ID_LIGHTING_LAMP_ARRAY_ATTRIBUTES = 1, // 1
+	REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_REQUEST, // 2
+	REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_RESPONSE, // 3
+	REPORT_ID_LIGHTING_LAMP_MULTI_UPDATE, // 4
+	REPORT_ID_LIGHTING_LAMP_RANGE_UPDATE, // 5
+	REPORT_ID_LIGHTING_LAMP_ARRAY_CONTROL, // 6
+	REPORT_ID_COUNT
+};
 
-#define DEVICE_MODE_MOUSE        0x00
-#define DEVICE_MODE_SINGLE_INPUT 0x01
-#define DEVICE_MODE_MULTI_INPUT  0x02
+#include <pshpack1.h>
 
-#pragma pack(1)
-typedef struct _CROSKBLIGHT_FEATURE_REPORT
+typedef struct _LAMPCOLOR
 {
+	UINT8 Red;
+	UINT8 Green;
+	UINT8 Blue;
+	UINT8 Intensity;
+} LampColor;
 
-	BYTE      ReportID;
-
-	BYTE      DeviceMode;
-
-	BYTE      DeviceIdentifier;
-
-} CrosKBLightFeatureReport;
-
-typedef struct _CROSKBLIGHT_MAXCOUNT_REPORT
+typedef struct _POSITION
 {
+	UINT32 x;
+	UINT32 y;
+	UINT32 z;
+} Position;
 
-	BYTE         ReportID;
-
-	BYTE         MaximumCount;
-
-} CrosKBLightMaxCountReport;
-#pragma pack()
-
-#pragma pack(1)
-typedef struct _CROSKBLIGHT_GETLIGHT_REPORT
+typedef struct _LAMPARRAY_ATTRIBUTES_REPORT
 {
+	BYTE ReportID;
+	UINT16 LampCount;
+	UINT32 Width;
+	UINT32 Height;
+	UINT32 Depth;
 
-	BYTE        ReportID;
+	UINT32 LampArrayKind;
+	UINT32 MinUpdateInterval;
+} LampArrayAttributesReport;
 
-	BYTE		Brightness;
-
-} CrosKBLightGetLightReport;
-#pragma pack()
-
-#pragma pack(1)
-typedef struct _CROSKBLIGHT_SETTINGS_REPORT
+typedef struct _LAMPARRAY_ATTRIBUTES_REQUEST_REPORT
 {
+	BYTE ReportID;
+	UINT16 LampID;
+} LampArrayAttributesRequestReport;
 
-	BYTE        ReportID;
+#define LAMP_PURPOSE_CONTROL        0x01
+#define LAMP_PURPOSE_ACCENT         0x02
+#define LAMP_PURPOSE_BRANDING       0x04
+#define LAMP_PURPOSE_STATUS         0x08
+#define LAMP_PURPOSE_ILLUMINATION   0x10
+#define LAMP_PURPOSE_PRESENTATION   0x20
 
-	BYTE		SetBrightness;
+typedef struct _LAMPARRAY_ATTRIBUTES_RESPONSE_REPORT
+{
+	BYTE ReportID;
+	UINT16 LampId;
 
-	BYTE		Brightness;
+	Position LampPosition;
 
-} CrosKBLightSettingsReport;
-#pragma pack()
+	UINT32 UpdateLatency;
+	UINT32 LampPurposes;
+
+	UINT8 RedLevelCount;
+	UINT8 GreenLevelCount;
+	UINT8 BlueLevelCount;
+	UINT8 IntensityLevelCount;
+
+	UINT8 IsProgrammable;
+	UINT8 InputBinding;
+} LampArrayAttributesResponseReport;
+
+typedef struct _LAMPARRAY_MULTI_UPDATE_REPORT
+{
+	BYTE ReportID;
+	UINT8 LampCount;
+	UINT8 Flags;
+	UINT16 LampIds[8];
+
+	LampColor Colors[8];
+} LampArrayMultiUpdateReport;
+
+typedef struct _LAMPARRAY_RANGE_UPDATE_REPORT
+{
+	BYTE ReportID;
+	UINT8 Flags;
+	UINT16 LampIdStart;
+	UINT16 LampIdEnd;
+
+	LampColor Color;
+} LampArrayRangeUpdateReport;
+
+typedef struct _LAMPARRAY_CONTROL_REPORT
+{
+	BYTE ReportID;
+	UINT8 AutonomousMode;
+} LampArrayControlReport;
+
+#include <poppack.h>
 
 #endif
 #pragma once

@@ -412,14 +412,14 @@ CrosKBLightS0ixNotifyCallback(
 	}
 }
 
-static void update_brightness(PCROSKBLIGHT_CONTEXT pDevice, BYTE brightness) {
+/*static void update_brightness(PCROSKBLIGHT_CONTEXT pDevice, BYTE brightness) {
 	_CROSKBLIGHT_GETLIGHT_REPORT report;
 	report.ReportID = REPORTID_KBLIGHT;
 	report.Brightness = brightness;
 
 	size_t bytesWritten;
 	CrosKBLightProcessVendorReport(pDevice, &report, sizeof(report), &bytesWritten);
-}
+}*/
 
 NTSTATUS
 CrosKBLightEvtDeviceAdd(
@@ -535,12 +535,6 @@ CrosKBLightEvtDeviceAdd(
 
 		return status;
 	}
-
-	//
-	// Initialize DeviceMode
-	//
-
-	devContext->DeviceMode = DEVICE_MODE_MOUSE;
 
 	return status;
 }
@@ -1006,24 +1000,6 @@ CrosKBLightWriteReport(
 
 			switch (transferPacket->reportId)
 			{
-			case REPORTID_KBLIGHT: {
-				CrosKBLightSettingsReport *pReport = (CrosKBLightSettingsReport *)transferPacket->reportBuffer;
-
-				int reg = pReport->SetBrightness;
-				int val = pReport->Brightness;
-
-				if (reg == 0) {
-					int brightness = DevContext->currentBrightness;
-					update_brightness(DevContext, brightness);
-				}
-				else if (reg == 1) {
-					DevContext->currentBrightness = val;
-#if NOTVM
-					CrosKBLightSetBacklight(DevContext, DevContext->currentBrightness);
-#endif
-				}
-				break;
-			}
 			default:
 				CrosKBLightPrint(DEBUG_LEVEL_ERROR, DBG_IOCTL,
 					"CrosKBLightWriteReport Unhandled report type %d\n", transferPacket->reportId);
@@ -1171,7 +1147,6 @@ CrosKBLightSetFeature(
 	NTSTATUS status = STATUS_SUCCESS;
 	WDF_REQUEST_PARAMETERS params;
 	PHID_XFER_PACKET transferPacket = NULL;
-	CrosKBLightFeatureReport* pReport = NULL;
 
 	CrosKBLightPrint(DEBUG_LEVEL_VERBOSE, DBG_IOCTL,
 		"CrosKBLightSetFeature Entry\n");
@@ -1206,6 +1181,40 @@ CrosKBLightSetFeature(
 
 			switch (transferPacket->reportId)
 			{
+			case REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_REQUEST: {
+				if (transferPacket->reportBufferLen >= sizeof(LampArrayAttributesRequestReport)) {
+					LampArrayAttributesRequestReport* requestReport = (LampArrayAttributesRequestReport*)transferPacket->reportBuffer;
+					DbgPrint("Update Current Lamp ID %d\n", requestReport->LampID);
+					DevContext->CurrentLampID = requestReport->LampID;
+					break;
+				}
+			}
+			case REPORT_ID_LIGHTING_LAMP_MULTI_UPDATE: {
+				if (transferPacket->reportBufferLen >= sizeof(LampArrayMultiUpdateReport)) {
+					LampArrayMultiUpdateReport* multiUpdateReport = (LampArrayMultiUpdateReport*)transferPacket->reportBuffer;
+					DbgPrint("Count: %d, Flags: 0x%x\n", multiUpdateReport->LampCount, multiUpdateReport->Flags);
+					for (int i = 0; i < multiUpdateReport->LampCount; i++) {
+						DbgPrint("ID: %d. Color: %d %d %d %d\n", multiUpdateReport->LampIds[i],
+							multiUpdateReport->Colors[i].Red, multiUpdateReport->Colors[i].Green, multiUpdateReport->Colors[i].Blue, multiUpdateReport->Colors[i].Intensity);
+					}
+					break;
+				}
+			}
+			case REPORT_ID_LIGHTING_LAMP_RANGE_UPDATE: {
+				if (transferPacket->reportBufferLen >= sizeof(LampArrayRangeUpdateReport)) {
+					LampArrayRangeUpdateReport* rangeUpdateReport = (LampArrayRangeUpdateReport*)transferPacket->reportBuffer;
+					DbgPrint("Range Update. Start: %d, End: %d, Color: %d %d %d %d\n",
+						rangeUpdateReport->LampIdStart, rangeUpdateReport->LampIdEnd,
+						rangeUpdateReport->Color.Red, rangeUpdateReport->Color.Green, rangeUpdateReport->Color.Blue, rangeUpdateReport->Color.Intensity);
+					break;
+				}
+			}case REPORT_ID_LIGHTING_LAMP_ARRAY_CONTROL: {
+				if (transferPacket->reportBufferLen >= sizeof(LampArrayControlReport)) {
+					LampArrayControlReport* controlReport = (LampArrayControlReport*)transferPacket->reportBuffer;
+					DbgPrint("Autonomous Mode? %d\n", controlReport->AutonomousMode);
+					break;
+				}
+			}
 			default:
 
 				CrosKBLightPrint(DEBUG_LEVEL_ERROR, DBG_IOCTL,
@@ -1268,6 +1277,36 @@ CrosKBLightGetFeature(
 
 			switch (transferPacket->reportId)
 			{
+			case REPORT_ID_LIGHTING_LAMP_ARRAY_ATTRIBUTES: {
+				if (transferPacket->reportBufferLen >= sizeof(LampArrayAttributesReport)) {
+					LampArrayAttributesReport* attributesReport = (LampArrayAttributesReport *)transferPacket->reportBuffer;
+					attributesReport->LampCount = 1;
+					attributesReport->Width = 15000; //1.5 cm
+					attributesReport->Height = 15000; //1.5 cm
+					attributesReport->Depth = 300; //0.3 cm
+					attributesReport->LampArrayKind = 1; //Keyboard
+					attributesReport->MinUpdateInterval = 1000; //10 ms
+					break;
+				}
+			}
+			case REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_RESPONSE: {
+				if (transferPacket->reportBufferLen >= sizeof(LampArrayAttributesResponseReport)) {
+					LampArrayAttributesResponseReport* responseReport = (LampArrayAttributesResponseReport*)transferPacket->reportBuffer;
+					responseReport->LampId = DevContext->CurrentLampID;
+					responseReport->LampPosition.x = 0;
+					responseReport->LampPosition.y = 0;
+					responseReport->LampPosition.z = 0;
+					responseReport->UpdateLatency = 1000; //10 ms
+					responseReport->LampPurposes = 1; //Keyboard
+					responseReport->RedLevelCount = 255;
+					responseReport->GreenLevelCount = 255;
+					responseReport->BlueLevelCount = 255;
+					responseReport->IntensityLevelCount = 100;
+					responseReport->IsProgrammable = 1;
+					responseReport->InputBinding = 0;
+					break;
+				}
+			}
 			default:
 
 				CrosKBLightPrint(DEBUG_LEVEL_ERROR, DBG_IOCTL,

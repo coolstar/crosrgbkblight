@@ -122,8 +122,6 @@ typedef struct _CROSKBLIGHT_CONTEXT
 
 	WDFQUEUE ReportQueue;
 
-	BYTE DeviceMode;
-
 	UINT8 currentBrightness;
 
 	PVOID CrosEcBusContext;
@@ -134,6 +132,8 @@ typedef struct _CROSKBLIGHT_CONTEXT
 	PCROSEC_CMD_XFER_STATUS CrosEcCmdXferStatus;
 
 	WDFIOTARGET busIoTarget;
+
+	UINT16 CurrentLampID;
 
 } CROSKBLIGHT_CONTEXT, *PCROSKBLIGHT_CONTEXT;
 
