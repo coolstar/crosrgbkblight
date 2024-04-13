@@ -48,6 +48,7 @@ DriverEntry(
 	return status;
 }
 
+#if NOTVM
 NTSTATUS ConnectToEc(
 	_In_ WDFDEVICE FxDevice
 ) {
@@ -231,6 +232,7 @@ CrosKBLightSetBacklight(
 	backlightParams.percent = Backlight;
 	return send_ec_command(pDevice, EC_CMD_PWM_SET_KEYBOARD_BACKLIGHT, 0, (UINT8*)&backlightParams, sizeof(struct ec_params_pwm_set_keyboard_backlight), NULL, 0);
 }
+#endif
 
 NTSTATUS
 OnPrepareHardware(
@@ -264,6 +266,7 @@ OnPrepareHardware(
 	UNREFERENCED_PARAMETER(FxResourcesRaw);
 	UNREFERENCED_PARAMETER(FxResourcesTranslated);
 
+#if NOTVM
 	status = ConnectToEc(FxDevice);
 	if (!NT_SUCCESS(status)) {
 		return status;
@@ -272,6 +275,7 @@ OnPrepareHardware(
 	(*pDevice->CrosEcCmdXferStatus)(pDevice->CrosEcBusContext, NULL);
 
 	CrosKBLightGetBacklight(pDevice, &pDevice->currentBrightness);
+#endif
 
 	status = WdfFdoQueryForInterface(FxDevice,
 		&GUID_ACPI_INTERFACE_STANDARD2,
@@ -355,7 +359,9 @@ OnD0Entry(
 	PCROSKBLIGHT_CONTEXT pDevice = GetDeviceContext(FxDevice);
 	NTSTATUS status = STATUS_SUCCESS;
 
+#if NOTVM
 	CrosKBLightSetBacklight(pDevice, pDevice->currentBrightness);
+#endif
 
 	return status;
 }
@@ -386,7 +392,9 @@ OnD0Exit(
 
 	if (FxTargetState != WdfPowerDeviceD3Final &&
 		FxTargetState != WdfPowerDevicePrepareForHibernation) {
+#if NOTVM
 		CrosKBLightSetBacklight(pDevice, 0);
+#endif
 	}
 
 	return STATUS_SUCCESS;
@@ -1010,7 +1018,9 @@ CrosKBLightWriteReport(
 				}
 				else if (reg == 1) {
 					DevContext->currentBrightness = val;
+#if NOTVM
 					CrosKBLightSetBacklight(DevContext, DevContext->currentBrightness);
+#endif
 				}
 				break;
 			}
