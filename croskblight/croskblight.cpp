@@ -2,6 +2,7 @@
 #include "croskblight.h"
 #include <acpiioct.h>
 #include <ntstrsafe.h>
+#define NOTVM 1
 
 VOID
 CrosKBLightS0ixNotifyCallback(
@@ -261,31 +262,51 @@ CrosKBLightSetBacklight(
 }
 #endif
 
+BOOLEAN validateAndLoad(
+	_In_ PCROSKBLIGHT_CONTEXT pDevice,
+	_In_ firmware *fw
+) {
+	if (fw->size < sizeof(CROSKBLIGHT_INFO)) { //Must be base info size at minimum
+		return FALSE;
+	}
+
+	CROSKBLIGHT_INFO* info = (CROSKBLIGHT_INFO*)fw->data;
+	UINT32 LampCount = info->LampCount;
+	size_t sz = sizeof(CROSKBLIGHT_INFO) + LampCount * sizeof(CROSKBLIGHT_KEY_INFO);
+	if (fw->size < sz) {
+		return FALSE;
+	}
+
+	pDevice->RGBLedInfo = (CROSKBLIGHT_INFO*)ExAllocatePoolZero(NonPagedPool, sz, CROSKBLIGHT_POOL_TAG);
+	RtlCopyMemory(&pDevice->RGBLedInfo, info, sz);
+	return TRUE;
+}
+
 NTSTATUS
 OnPrepareHardware(
 	_In_  WDFDEVICE     FxDevice,
 	_In_  WDFCMRESLIST  FxResourcesRaw,
 	_In_  WDFCMRESLIST  FxResourcesTranslated
-	)
-	/*++
+)
+/*++
 
-	Routine Description:
+Routine Description:
 
-	This routine caches the SPB resource connection ID.
+This routine caches the SPB resource connection ID.
 
-	Arguments:
+Arguments:
 
-	FxDevice - a handle to the framework device object
-	FxResourcesRaw - list of translated hardware resources that
-	the PnP manager has assigned to the device
-	FxResourcesTranslated - list of raw hardware resources that
-	the PnP manager has assigned to the device
+FxDevice - a handle to the framework device object
+FxResourcesRaw - list of translated hardware resources that
+the PnP manager has assigned to the device
+FxResourcesTranslated - list of raw hardware resources that
+the PnP manager has assigned to the device
 
-	Return Value:
+Return Value:
 
-	Status
+Status
 
-	--*/
+--*/
 {
 	PCROSKBLIGHT_CONTEXT pDevice = GetDeviceContext(FxDevice);
 	NTSTATUS status = STATUS_SUCCESS;
@@ -309,15 +330,50 @@ OnPrepareHardware(
 		ec_params_rgbkbd kbdCmd = { 0 };
 		kbdCmd.subcmd = EC_RGBKBD_SUBCMD_GET_CONFIG;
 		ec_response_rgbkbd kbdResp = { 0 };
-		if (NT_SUCCESS(send_ec_command(pDevice, EC_CMD_RGBKBD, 0, (UINT8 *)&kbdCmd, sizeof(kbdCmd), (UINT8 *)&kbdResp, sizeof(kbdResp)))){
+		if (NT_SUCCESS(send_ec_command(pDevice, EC_CMD_RGBKBD, 0, (UINT8*)&kbdCmd, sizeof(kbdCmd), (UINT8*)&kbdResp, sizeof(kbdResp)))) {
 			if (kbdResp.rgbkbd_type > EC_RGBKBD_TYPE_UNKNOWN) {
 				DbgPrint("Got RGB Keyboard Type: %d\n", kbdResp.rgbkbd_type);
+
+				WCHAR fwPath[MAX_DEVICE_REG_VAL_LENGTH];
+
+				WCHAR SystemProductName[MAX_DEVICE_REG_VAL_LENGTH];
+				status = GetSmbiosName(SystemProductName);
+				if (NT_SUCCESS(status)) {
+					status = RtlStringCbPrintfW(fwPath, MAX_DEVICE_REG_VAL_LENGTH, L"\\SystemRoot\\system32\\DRIVERS\\croskbrgb_%s.bin", SystemProductName);
+					if (NT_SUCCESS(status)) {
+						struct firmware* fw = NULL;
+						status = request_firmware(&fw, fwPath);
+						if (NT_SUCCESS(status)) {
+							validateAndLoad(pDevice, fw);
+							free_firmware(fw);
+						}
+						else {
+							DbgPrint("Failed to load %ws\n", fwPath);
+						}
+					}
+				}
+
+				if (!pDevice->RGBLedInfo) {
+					status = RtlStringCbPrintfW(fwPath, MAX_DEVICE_REG_VAL_LENGTH, L"\\SystemRoot\\system32\\DRIVERS\\croskbrgb_generic_%d.bin", kbdResp.rgbkbd_type);
+					if (NT_SUCCESS(status)) {
+						struct firmware* fw = NULL;
+						status = request_firmware(&fw, fwPath);
+						if (NT_SUCCESS(status)) {
+							validateAndLoad(pDevice, fw);
+							free_firmware(fw);
+						}
+					}
+					else {
+						DbgPrint("Failed to load %ws\n", fwPath);
+					}
+				}
+
 				supportsRGBKBD = TRUE;
 			}
 		}
 	}
 
-	if (TRUE) {
+	if (!pDevice->RGBLedInfo){
 		UINT8 keyCount = 1;
 
 		pDevice->RGBLedInfo = (CROSKBLIGHT_INFO *)ExAllocatePoolZero(NonPagedPool, sizeof(CROSKBLIGHT_INFO) + (keyCount * sizeof(CROSKBLIGHT_KEY_INFO)), CROSKBLIGHT_POOL_TAG);
