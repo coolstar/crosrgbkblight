@@ -22,6 +22,8 @@
 #include "hidcommon.h"
 #include "eccmds.h"
 
+#include "kblightsettings.h"
+
 extern "C"
 
 NTSTATUS
@@ -134,6 +136,8 @@ typedef struct _CROSKBLIGHT_CONTEXT
 	WDFIOTARGET busIoTarget;
 
 	UINT16 CurrentLampID;
+
+	CROSKBLIGHT_INFO* RGBLedInfo;
 
 } CROSKBLIGHT_CONTEXT, *PCROSKBLIGHT_CONTEXT;
 

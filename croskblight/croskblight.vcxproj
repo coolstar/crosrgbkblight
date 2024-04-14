@@ -29,6 +29,7 @@
     <ClInclude Include="eccmds.h" />
     <ClInclude Include="hidcommon.h" />
     <ClInclude Include="hiddefs.h" />
+    <ClInclude Include="kblightsettings.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="Trace.h" />
   </ItemGroup>

@@ -277,6 +277,27 @@ OnPrepareHardware(
 	CrosKBLightGetBacklight(pDevice, &pDevice->currentBrightness);
 #endif
 
+	if (TRUE) {
+		UINT8 keyCount = 1;
+
+		pDevice->RGBLedInfo = (CROSKBLIGHT_INFO *)ExAllocatePoolZero(NonPagedPool, sizeof(CROSKBLIGHT_INFO) + (keyCount * sizeof(CROSKBLIGHT_KEY_INFO)), CROSKBLIGHT_POOL_TAG);
+		if (!pDevice->RGBLedInfo) {
+			return STATUS_NO_MEMORY;
+		}
+		pDevice->RGBLedInfo->LampCount = keyCount;
+		pDevice->RGBLedInfo->Width = 15000; //1.5 cm
+		pDevice->RGBLedInfo->Height = 15000; //1.5 cm
+		pDevice->RGBLedInfo->Depth = 300; //0.3 cm
+
+		pDevice->RGBLedInfo->Keys[0].Pos_X = 0;
+		pDevice->RGBLedInfo->Keys[0].Pos_Y = 0;
+		pDevice->RGBLedInfo->Keys[0].Pos_Z = 0;
+		pDevice->RGBLedInfo->Keys[0].RedCount = 255;
+		pDevice->RGBLedInfo->Keys[0].GreenCount = 255;
+		pDevice->RGBLedInfo->Keys[0].BlueCount = 255;
+		pDevice->RGBLedInfo->Keys[0].IntensityCount = 100;
+		pDevice->RGBLedInfo->Keys[0].IsProgrammable = 0;
+	}
 	status = WdfFdoQueryForInterface(FxDevice,
 		&GUID_ACPI_INTERFACE_STANDARD2,
 		(PINTERFACE)&pDevice->S0ixNotifyAcpiInterface,
@@ -327,6 +348,11 @@ OnReleaseHardware(
 
 	if (pDevice->S0ixNotifyAcpiInterface.Context) { //Used for S0ix notifications
 		pDevice->S0ixNotifyAcpiInterface.UnregisterForDeviceNotifications(pDevice->S0ixNotifyAcpiInterface.Context);
+	}
+
+	if (pDevice->RGBLedInfo) {
+		ExFreePool(pDevice->RGBLedInfo);
+		pDevice->RGBLedInfo = NULL;
 	}
 
 	return status;
@@ -1280,10 +1306,10 @@ CrosKBLightGetFeature(
 			case REPORT_ID_LIGHTING_LAMP_ARRAY_ATTRIBUTES: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayAttributesReport)) {
 					LampArrayAttributesReport* attributesReport = (LampArrayAttributesReport *)transferPacket->reportBuffer;
-					attributesReport->LampCount = 1;
-					attributesReport->Width = 15000; //1.5 cm
-					attributesReport->Height = 15000; //1.5 cm
-					attributesReport->Depth = 300; //0.3 cm
+					attributesReport->LampCount = DevContext->RGBLedInfo->LampCount;
+					attributesReport->Width = DevContext->RGBLedInfo->Width;
+					attributesReport->Height = DevContext->RGBLedInfo->Height;
+					attributesReport->Depth = DevContext->RGBLedInfo->Depth;
 					attributesReport->LampArrayKind = 1; //Keyboard
 					attributesReport->MinUpdateInterval = 1000; //10 ms
 					break;
@@ -1292,18 +1318,23 @@ CrosKBLightGetFeature(
 			case REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_RESPONSE: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayAttributesResponseReport)) {
 					LampArrayAttributesResponseReport* responseReport = (LampArrayAttributesResponseReport*)transferPacket->reportBuffer;
-					responseReport->LampId = DevContext->CurrentLampID;
-					responseReport->LampPosition.x = 0;
-					responseReport->LampPosition.y = 0;
-					responseReport->LampPosition.z = 0;
+					UINT8 lampID = DevContext->CurrentLampID;
+					if (lampID > DevContext->RGBLedInfo->LampCount) {
+						lampID = 0;
+					}
+
+					responseReport->LampId = lampID;
+					responseReport->LampPosition.x = DevContext->RGBLedInfo->Keys[0].Pos_X;
+					responseReport->LampPosition.y = DevContext->RGBLedInfo->Keys[0].Pos_Y;
+					responseReport->LampPosition.z = DevContext->RGBLedInfo->Keys[0].Pos_Z;
 					responseReport->UpdateLatency = 1000; //10 ms
 					responseReport->LampPurposes = 1; //Keyboard
-					responseReport->RedLevelCount = 255;
-					responseReport->GreenLevelCount = 255;
-					responseReport->BlueLevelCount = 255;
-					responseReport->IntensityLevelCount = 100;
-					responseReport->IsProgrammable = 1;
-					responseReport->InputBinding = 0;
+					responseReport->RedLevelCount = DevContext->RGBLedInfo->Keys[0].RedCount;
+					responseReport->GreenLevelCount = DevContext->RGBLedInfo->Keys[0].GreenCount;
+					responseReport->BlueLevelCount = DevContext->RGBLedInfo->Keys[0].BlueCount;
+					responseReport->IntensityLevelCount = DevContext->RGBLedInfo->Keys[0].IntensityCount;
+					responseReport->IsProgrammable = DevContext->RGBLedInfo->Keys[0].IsProgrammable;
+					responseReport->InputBinding = DevContext->RGBLedInfo->Keys[0].InputBinding;
 					break;
 				}
 			}
