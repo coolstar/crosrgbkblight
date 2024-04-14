@@ -124,8 +124,6 @@ typedef struct _CROSKBLIGHT_CONTEXT
 
 	WDFQUEUE ReportQueue;
 
-	UINT8 currentBrightness;
-
 	PVOID CrosEcBusContext;
 
 	//S0IX Notify
@@ -136,6 +134,8 @@ typedef struct _CROSKBLIGHT_CONTEXT
 	WDFIOTARGET busIoTarget;
 
 	UINT16 CurrentLampID;
+
+	BOOLEAN SupportsRGB;
 
 	CROSKBLIGHT_INFO* RGBLedInfo;
 

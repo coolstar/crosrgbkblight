@@ -202,27 +202,6 @@ BOOLEAN cros_ec_cmd_version_supported(PCROSKBLIGHT_CONTEXT pDevice, int cmd, int
 }
 
 NTSTATUS
-CrosKBLightGetBacklight(
-	_In_ PCROSKBLIGHT_CONTEXT pDevice,
-	UINT8* PBacklight
-)
-{
-	struct ec_response_pwm_get_keyboard_backlight backlightParams;
-	NTSTATUS status = send_ec_command(pDevice, EC_CMD_PWM_GET_KEYBOARD_BACKLIGHT, 0, NULL, 0, (UINT8*)&backlightParams, sizeof(struct ec_response_pwm_get_keyboard_backlight));
-	if (!NT_SUCCESS(status))
-		return status;
-	if (PBacklight) {
-		if (backlightParams.enabled) {
-			*PBacklight = backlightParams.percent;
-		}
-		else {
-			*PBacklight = 0;
-		}
-	}
-	return status;
-}
-
-NTSTATUS
 CrosKBLightSetBacklight(
 	_In_ PCROSKBLIGHT_CONTEXT pDevice,
 	UINT8 Backlight
@@ -273,8 +252,6 @@ OnPrepareHardware(
 	}
 
 	(*pDevice->CrosEcCmdXferStatus)(pDevice->CrosEcBusContext, NULL);
-
-	CrosKBLightGetBacklight(pDevice, &pDevice->currentBrightness);
 #endif
 
 	if (TRUE) {
@@ -298,6 +275,14 @@ OnPrepareHardware(
 		pDevice->RGBLedInfo->Keys[0].IntensityCount = 100;
 		pDevice->RGBLedInfo->Keys[0].IsProgrammable = 0;
 	}
+
+	if (pDevice->RGBLedInfo->LampCount == 0 && pDevice->RGBLedInfo->Keys[0].IsProgrammable == 0) {
+		pDevice->SupportsRGB = FALSE;
+	}
+	else {
+		pDevice->SupportsRGB = TRUE;
+	}
+
 	status = WdfFdoQueryForInterface(FxDevice,
 		&GUID_ACPI_INTERFACE_STANDARD2,
 		(PINTERFACE)&pDevice->S0ixNotifyAcpiInterface,
@@ -386,7 +371,7 @@ OnD0Entry(
 	NTSTATUS status = STATUS_SUCCESS;
 
 #if NOTVM
-	CrosKBLightSetBacklight(pDevice, pDevice->currentBrightness);
+	CrosKBLightSetBacklight(pDevice, 100);
 #endif
 
 	return status;
