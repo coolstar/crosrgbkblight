@@ -23,10 +23,12 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="croskblight.cpp" />
+    <ClCompile Include="firmware.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="croskblight.h" />
     <ClInclude Include="eccmds.h" />
+    <ClInclude Include="firmware.h" />
     <ClInclude Include="hidcommon.h" />
     <ClInclude Include="hiddefs.h" />
     <ClInclude Include="kblightsettings.h" />

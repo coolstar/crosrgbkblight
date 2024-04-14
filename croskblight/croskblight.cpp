@@ -48,6 +48,54 @@ DriverEntry(
 	return status;
 }
 
+#define MAX_DEVICE_REG_VAL_LENGTH 0x100
+NTSTATUS GetSmbiosName(WCHAR systemProductName[MAX_DEVICE_REG_VAL_LENGTH]) {
+	NTSTATUS status = STATUS_UNSUCCESSFUL;
+	HANDLE parentKey = NULL;
+	UNICODE_STRING ParentKeyName;
+	OBJECT_ATTRIBUTES  ObjectAttributes;
+	RtlInitUnicodeString(&ParentKeyName, L"\\Registry\\Machine\\Hardware\\DESCRIPTION\\System\\BIOS");
+
+	InitializeObjectAttributes(&ObjectAttributes,
+		&ParentKeyName,
+		OBJ_CASE_INSENSITIVE | OBJ_KERNEL_HANDLE,
+		NULL,    // handle
+		NULL);
+
+	status = ZwOpenKey(&parentKey, KEY_READ, &ObjectAttributes);
+	if (!NT_SUCCESS(status)) {
+		return status;
+	}
+
+	ULONG ResultLength;
+	PKEY_VALUE_PARTIAL_INFORMATION KeyValueInfo = (PKEY_VALUE_PARTIAL_INFORMATION)ExAllocatePoolZero(NonPagedPool, sizeof(KEY_VALUE_PARTIAL_INFORMATION) + MAX_DEVICE_REG_VAL_LENGTH, CROSKBLIGHT_POOL_TAG);
+	if (!KeyValueInfo) {
+		status = STATUS_NO_MEMORY;
+		goto exit;
+	}
+
+	UNICODE_STRING SystemProductNameValue;
+	RtlInitUnicodeString(&SystemProductNameValue, L"SystemProductName");
+	status = ZwQueryValueKey(parentKey, &SystemProductNameValue, KeyValuePartialInformation, KeyValueInfo, sizeof(KEY_VALUE_PARTIAL_INFORMATION) + MAX_DEVICE_REG_VAL_LENGTH, &ResultLength);
+	if (!NT_SUCCESS(status)) {
+		goto exit;
+	}
+
+	if (KeyValueInfo->DataLength > MAX_DEVICE_REG_VAL_LENGTH) {
+		status = STATUS_BUFFER_OVERFLOW;
+		goto exit;
+	}
+
+	RtlZeroMemory(systemProductName, sizeof(systemProductName));
+	RtlCopyMemory(systemProductName, &KeyValueInfo->Data, KeyValueInfo->DataLength);
+
+exit:
+	if (KeyValueInfo) {
+		ExFreePoolWithTag(KeyValueInfo, CROSKBLIGHT_POOL_TAG);
+	}
+	return status;
+}
+
 #if NOTVM
 NTSTATUS ConnectToEc(
 	_In_ WDFDEVICE FxDevice
@@ -253,6 +301,21 @@ OnPrepareHardware(
 
 	(*pDevice->CrosEcCmdXferStatus)(pDevice->CrosEcBusContext, NULL);
 #endif
+
+	pDevice->RGBLedInfo = NULL;
+
+	BOOLEAN supportsRGBKBD = FALSE;
+	if (cros_ec_cmd_version_supported(pDevice, EC_CMD_RGBKBD, 0)) {
+		ec_params_rgbkbd kbdCmd = { 0 };
+		kbdCmd.subcmd = EC_RGBKBD_SUBCMD_GET_CONFIG;
+		ec_response_rgbkbd kbdResp = { 0 };
+		if (NT_SUCCESS(send_ec_command(pDevice, EC_CMD_RGBKBD, 0, (UINT8 *)&kbdCmd, sizeof(kbdCmd), (UINT8 *)&kbdResp, sizeof(kbdResp)))){
+			if (kbdResp.rgbkbd_type > EC_RGBKBD_TYPE_UNKNOWN) {
+				DbgPrint("Got RGB Keyboard Type: %d\n", kbdResp.rgbkbd_type);
+				supportsRGBKBD = TRUE;
+			}
+		}
+	}
 
 	if (TRUE) {
 		UINT8 keyCount = 1;
@@ -1207,7 +1270,35 @@ CrosKBLightSetFeature(
 					for (int i = 0; i < multiUpdateReport->LampCount; i++) {
 						DbgPrint("ID: %d. Color: %d %d %d %d\n", multiUpdateReport->LampIds[i],
 							multiUpdateReport->Colors[i].Red, multiUpdateReport->Colors[i].Green, multiUpdateReport->Colors[i].Blue, multiUpdateReport->Colors[i].Intensity);
+
+						UINT16 LampID = multiUpdateReport->LampIds[i];
+						if (LampID < EC_RGBKBD_MAX_KEY_COUNT) {
+							DevContext->KeyStates[DevContext->CurrentLampID].r = multiUpdateReport->Colors[i].Red;
+							DevContext->KeyStates[DevContext->CurrentLampID].g = multiUpdateReport->Colors[i].Green;
+							DevContext->KeyStates[DevContext->CurrentLampID].b = multiUpdateReport->Colors[i].Blue;
+						}
 					}
+
+#if NOTVM
+					if (DevContext->SupportsRGB) {
+						size_t outLen = sizeof(ec_params_rgbkbd_set_color) + EC_RGBKBD_MAX_KEY_COUNT * sizeof(rgb_s);
+						ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color *)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
+						if (setColorParams) {
+							setColorParams->start_key = 1;
+							setColorParams->length = EC_RGBKBD_MAX_KEY_COUNT;
+							RtlCopyMemory(&setColorParams->color, &DevContext->KeyStates, sizeof(DevContext->KeyStates));
+							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
+								NULL, 0);
+							DbgPrint("Set Multi States: 0x%x\n", cmdSts);
+							ExFreePool(setColorParams);
+						}
+					}
+					else {
+						if (multiUpdateReport->LampCount > 0) {
+							CrosKBLightSetBacklight(DevContext, multiUpdateReport->Colors[0].Intensity);
+						}
+					}
+#endif
 					break;
 				}
 			}
@@ -1217,12 +1308,55 @@ CrosKBLightSetFeature(
 					DbgPrint("Range Update. Start: %d, End: %d, Color: %d %d %d %d\n",
 						rangeUpdateReport->LampIdStart, rangeUpdateReport->LampIdEnd,
 						rangeUpdateReport->Color.Red, rangeUpdateReport->Color.Green, rangeUpdateReport->Color.Blue, rangeUpdateReport->Color.Intensity);
+
+					if (DevContext->CurrentLampID < EC_RGBKBD_MAX_KEY_COUNT) {
+						DevContext->KeyStates[DevContext->CurrentLampID].r = rangeUpdateReport->Color.Red;
+						DevContext->KeyStates[DevContext->CurrentLampID].g = rangeUpdateReport->Color.Green;
+						DevContext->KeyStates[DevContext->CurrentLampID].b = rangeUpdateReport->Color.Blue;
+					}
+
+#if NOTVM
+					if (DevContext->SupportsRGB) {
+						ec_params_rgbkbd_set_color *setColorParams = (ec_params_rgbkbd_set_color *)ExAllocatePoolZero(
+							NonPagedPool, sizeof(ec_params_rgbkbd_set_color) + sizeof(rgb_s), CROSKBLIGHT_POOL_TAG);
+						if (setColorParams) {
+							setColorParams->start_key = DevContext->CurrentLampID + 1;
+							setColorParams->length = 1;
+							setColorParams->color->r = rangeUpdateReport->Color.Red;
+							setColorParams->color->g = rangeUpdateReport->Color.Green;
+							setColorParams->color->b = rangeUpdateReport->Color.Blue;
+
+							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, sizeof(ec_params_rgbkbd_set_color) + sizeof(rgb_s),
+								NULL, 0);
+							DbgPrint("Set Lamp Range: 0x%x\n", cmdSts);
+							ExFreePool(setColorParams);
+						}
+					}
+					else {
+						CrosKBLightSetBacklight(DevContext, rangeUpdateReport->Color.Intensity);
+					}
+#endif
 					break;
 				}
 			}case REPORT_ID_LIGHTING_LAMP_ARRAY_CONTROL: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayControlReport)) {
 					LampArrayControlReport* controlReport = (LampArrayControlReport*)transferPacket->reportBuffer;
 					DbgPrint("Autonomous Mode? %d\n", controlReport->AutonomousMode);
+
+#if NOTVM
+					if (DevContext->SupportsRGB) {
+						ec_params_rgbkbd* setRGBParam = (ec_params_rgbkbd*)ExAllocatePoolZero(
+							NonPagedPool, sizeof(ec_params_rgbkbd), CROSKBLIGHT_POOL_TAG);
+						if (setRGBParam) {
+							setRGBParam->subcmd = EC_RGBKBD_SUBCMD_DEMO;
+							setRGBParam->demo = controlReport->AutonomousMode ? EC_RGBKBD_DEMO_FLOW : EC_RGBKBD_DEMO_OFF;
+							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD, 0, (UINT8*)setRGBParam, sizeof(ec_params_rgbkbd),
+								NULL, 0);
+							DbgPrint("Set Autonomous: 0x%x\n", cmdSts);
+							ExFreePool(setRGBParam);
+						}
+					}
+#endif
 					break;
 				}
 			}

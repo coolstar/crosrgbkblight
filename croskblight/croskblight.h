@@ -23,6 +23,7 @@
 #include "eccmds.h"
 
 #include "kblightsettings.h"
+#include "firmware.h"
 
 extern "C"
 
@@ -138,6 +139,8 @@ typedef struct _CROSKBLIGHT_CONTEXT
 	BOOLEAN SupportsRGB;
 
 	CROSKBLIGHT_INFO* RGBLedInfo;
+
+	rgb_s KeyStates[EC_RGBKBD_MAX_KEY_COUNT];
 
 } CROSKBLIGHT_CONTEXT, *PCROSKBLIGHT_CONTEXT;
 

@@ -96,6 +96,88 @@ struct ec_response_pwm_get_duty {
 
 #include <poppack.h>
 
+#define EC_CMD_RGBKBD_SET_COLOR 0x013A
+#define EC_CMD_RGBKBD 0x013B
+
+#define EC_RGBKBD_MAX_KEY_COUNT 128
+#define EC_RGBKBD_MAX_RGB_COLOR 0xFFFFFF
+#define EC_RGBKBD_MAX_SCALE 0xFF
+
+enum rgbkbd_state {
+	/* RGB keyboard is reset and not initialized. */
+	RGBKBD_STATE_RESET = 0,
+	/* RGB keyboard is initialized but not enabled. */
+	RGBKBD_STATE_INITIALIZED,
+	/* RGB keyboard is disabled. */
+	RGBKBD_STATE_DISABLED,
+	/* RGB keyboard is enabled and ready to receive a command. */
+	RGBKBD_STATE_ENABLED,
+
+	/* Put no more entry below */
+	RGBKBD_STATE_COUNT,
+};
+
+enum ec_rgbkbd_subcmd {
+	EC_RGBKBD_SUBCMD_CLEAR = 1,
+	EC_RGBKBD_SUBCMD_DEMO = 2,
+	EC_RGBKBD_SUBCMD_SET_SCALE = 3,
+	EC_RGBKBD_SUBCMD_GET_CONFIG = 4,
+	EC_RGBKBD_SUBCMD_COUNT
+};
+
+enum ec_rgbkbd_demo {
+	EC_RGBKBD_DEMO_OFF = 0,
+	EC_RGBKBD_DEMO_FLOW = 1,
+	EC_RGBKBD_DEMO_DOT = 2,
+	EC_RGBKBD_DEMO_COUNT,
+};
+
+enum ec_rgbkbd_type {
+	EC_RGBKBD_TYPE_UNKNOWN = 0,
+	EC_RGBKBD_TYPE_PER_KEY = 1, /* e.g. Vell */
+	EC_RGBKBD_TYPE_FOUR_ZONES_40_LEDS = 2, /* e.g. Taniks */
+	EC_RGBKBD_TYPE_FOUR_ZONES_12_LEDS = 3, /* e.g. Osiris */
+	EC_RGBKBD_TYPE_FOUR_ZONES_4_LEDS = 4, /* e.g. Mithrax */
+	EC_RGBKBD_TYPE_COUNT,
+};
+
+struct rgb_s {
+	UINT8 r, g, b;
+};
+
+struct ec_rgbkbd_set_scale {
+	UINT8 key;
+	struct rgb_s scale;
+};
+
+#include <pshpack1.h>
+struct ec_params_rgbkbd {
+	UINT8 subcmd; /* Sub-command (enum ec_rgbkbd_subcmd) */
+	union {
+		struct rgb_s color; /* EC_RGBKBD_SUBCMD_CLEAR */
+		UINT8 demo; /* EC_RGBKBD_SUBCMD_DEMO */
+		struct ec_rgbkbd_set_scale set_scale;
+	};
+};
+
+struct ec_response_rgbkbd {
+	/*
+	 * RGBKBD type supported by the device.
+	 */
+
+	UINT8 rgbkbd_type; /* enum ec_rgbkbd_type */
+};
+
+struct ec_params_rgbkbd_set_color {
+	/* Specifies the starting key ID whose color is being changed. */
+	UINT8 start_key;
+	/* Specifies # of elements in <color>. */
+	UINT8 length;
+	/* RGB color data array of length up to MAX_KEY_COUNT. */
+	struct rgb_s color[];
+};
+#include <poppack.h>
+
 /* Read versions supported for a command */
 #define EC_CMD_GET_CMD_VERSIONS 0x0008
 
