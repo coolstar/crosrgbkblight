@@ -222,6 +222,8 @@ DbgHidInternalIoctlString(
 	IN ULONG        IoControlCode
 	);
 
+#define KEYSPAGE 40
+
 //
 // Helper macros
 //

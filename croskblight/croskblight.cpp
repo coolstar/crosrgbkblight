@@ -1346,17 +1346,24 @@ CrosKBLightSetFeature(
 #if NOTVM
 					if (DevContext->SupportsRGB) {
 						int keysUpdate = min(EC_RGBKBD_MAX_KEY_COUNT, DevContext->RGBLedInfo->LampCount);
-						size_t outLen = sizeof(ec_params_rgbkbd_set_color) + keysUpdate * sizeof(rgb_s);
-						ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color *)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
-						if (setColorParams) {
-							setColorParams->start_key = 1;
-							setColorParams->length = keysUpdate;
-							RtlCopyMemory(setColorParams->color, &DevContext->KeyStates, sizeof(DevContext->KeyStates));
-							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
-								NULL, 0);
-							CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
-								"Set Multi States: 0x%x\n", cmdSts);
-							ExFreePool(setColorParams);
+
+						for (int i = 0; i < keysUpdate; i += KEYSPAGE) {
+							int keysPageLen = min(KEYSPAGE, keysUpdate - i);
+							size_t outLen = sizeof(ec_params_rgbkbd_set_color) + keysPageLen * sizeof(rgb_s);
+							ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color*)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
+							if (setColorParams) {
+								setColorParams->start_key = 1 + i;
+								setColorParams->length = min(KEYSPAGE, keysUpdate - i);
+								for (int k = 0; k < setColorParams->length; k++) {
+									setColorParams->color[k] = DevContext->KeyStates[i + k];
+								}
+
+								NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
+									NULL, 0);
+								CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+									"Set Multi States: 0x%x\n", cmdSts);
+								ExFreePool(setColorParams);
+							}
 						}
 					}
 					else {
@@ -1385,17 +1392,24 @@ CrosKBLightSetFeature(
 #if NOTVM
 					if (DevContext->SupportsRGB) {
 						int keysUpdate = min(EC_RGBKBD_MAX_KEY_COUNT, DevContext->RGBLedInfo->LampCount);
-						size_t outLen = sizeof(ec_params_rgbkbd_set_color) + keysUpdate * sizeof(rgb_s);
-						ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color*)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
-						if (setColorParams) {
-							setColorParams->start_key = 1;
-							setColorParams->length = keysUpdate;
-							RtlCopyMemory(setColorParams->color, &DevContext->KeyStates, sizeof(DevContext->KeyStates));
-							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
-								NULL, 0);
-							CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
-								"Set Multi States: 0x%x\n", cmdSts);
-							ExFreePool(setColorParams);
+
+						for (int i = 0; i < keysUpdate; i += KEYSPAGE) {
+							int keysPageLen = min(KEYSPAGE, keysUpdate - i);
+							size_t outLen = sizeof(ec_params_rgbkbd_set_color) + keysPageLen * sizeof(rgb_s);
+							ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color*)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
+							if (setColorParams) {
+								setColorParams->start_key = 1 + i;
+								setColorParams->length = min(KEYSPAGE, keysUpdate - i);
+								for (int k = 0; k < setColorParams->length; k++) {
+									setColorParams->color[k] = DevContext->KeyStates[i + k];
+								}
+
+								NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
+									NULL, 0);
+								CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+									"Set Multi States: 0x%x\n", cmdSts);
+								ExFreePool(setColorParams);
+							}
 						}
 					}
 					else {
@@ -1419,7 +1433,8 @@ CrosKBLightSetFeature(
 							setRGBParam->demo = controlReport->AutonomousMode ? EC_RGBKBD_DEMO_FLOW : EC_RGBKBD_DEMO_OFF;
 							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD, 0, (UINT8*)setRGBParam, sizeof(ec_params_rgbkbd),
 								NULL, 0);
-							DbgPrint("Set Autonomous: 0x%x\n", cmdSts);
+							CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+								"Set Autonomous: 0x%x\n", cmdSts);
 							ExFreePool(setRGBParam);
 						}
 					}
