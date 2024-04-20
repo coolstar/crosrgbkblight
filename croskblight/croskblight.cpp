@@ -274,11 +274,12 @@ BOOLEAN validateAndLoad(
 	UINT32 LampCount = info->LampCount;
 	size_t sz = sizeof(CROSKBLIGHT_INFO) + LampCount * sizeof(CROSKBLIGHT_KEY_INFO);
 	if (fw->size < sz) {
+		DbgPrint("Size is too small: %lld (expected %lld)\n", fw->size, sz);
 		return FALSE;
 	}
 
 	pDevice->RGBLedInfo = (CROSKBLIGHT_INFO*)ExAllocatePoolZero(NonPagedPool, sz, CROSKBLIGHT_POOL_TAG);
-	RtlCopyMemory(&pDevice->RGBLedInfo, info, sz);
+	RtlCopyMemory(pDevice->RGBLedInfo, info, sz);
 	return TRUE;
 }
 
@@ -326,7 +327,7 @@ Status
 	pDevice->RGBLedInfo = NULL;
 
 	BOOLEAN supportsRGBKBD = FALSE;
-	if (cros_ec_cmd_version_supported(pDevice, EC_CMD_RGBKBD, 0)) {
+	if (!cros_ec_cmd_version_supported(pDevice, EC_CMD_RGBKBD, 0)) {
 		ec_params_rgbkbd kbdCmd = { 0 };
 		kbdCmd.subcmd = EC_RGBKBD_SUBCMD_GET_CONFIG;
 		ec_response_rgbkbd kbdResp = { 0 };
@@ -362,9 +363,12 @@ Status
 							validateAndLoad(pDevice, fw);
 							free_firmware(fw);
 						}
+						else {
+							DbgPrint("Failed to load %ws\n", fwPath);
+						}
 					}
 					else {
-						DbgPrint("Failed to load %ws\n", fwPath);
+						DbgPrint("Failed create fwPath\n");
 					}
 				}
 
@@ -400,6 +404,7 @@ Status
 	}
 	else {
 		pDevice->SupportsRGB = TRUE;
+		DbgPrint("RGB Supported! Keys: %d\n", pDevice->RGBLedInfo->LampCount);
 	}
 
 	status = WdfFdoQueryForInterface(FxDevice,
@@ -1314,7 +1319,8 @@ CrosKBLightSetFeature(
 			case REPORT_ID_LIGHTING_LAMP_ATTRIBUTES_REQUEST: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayAttributesRequestReport)) {
 					LampArrayAttributesRequestReport* requestReport = (LampArrayAttributesRequestReport*)transferPacket->reportBuffer;
-					DbgPrint("Update Current Lamp ID %d\n", requestReport->LampID);
+					CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+						"Update Current Lamp ID %d\n", requestReport->LampID);
 					DevContext->CurrentLampID = requestReport->LampID;
 					break;
 				}
@@ -1322,30 +1328,34 @@ CrosKBLightSetFeature(
 			case REPORT_ID_LIGHTING_LAMP_MULTI_UPDATE: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayMultiUpdateReport)) {
 					LampArrayMultiUpdateReport* multiUpdateReport = (LampArrayMultiUpdateReport*)transferPacket->reportBuffer;
-					DbgPrint("Count: %d, Flags: 0x%x\n", multiUpdateReport->LampCount, multiUpdateReport->Flags);
+					CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+						"Count: %d, Flags: 0x%x\n", multiUpdateReport->LampCount, multiUpdateReport->Flags);
 					for (int i = 0; i < multiUpdateReport->LampCount; i++) {
-						DbgPrint("ID: %d. Color: %d %d %d %d\n", multiUpdateReport->LampIds[i],
+						CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+							"ID: %d. Color: %d %d %d %d\n", multiUpdateReport->LampIds[i],
 							multiUpdateReport->Colors[i].Red, multiUpdateReport->Colors[i].Green, multiUpdateReport->Colors[i].Blue, multiUpdateReport->Colors[i].Intensity);
 
 						UINT16 LampID = multiUpdateReport->LampIds[i];
-						if (LampID < EC_RGBKBD_MAX_KEY_COUNT) {
-							DevContext->KeyStates[DevContext->CurrentLampID].r = multiUpdateReport->Colors[i].Red;
-							DevContext->KeyStates[DevContext->CurrentLampID].g = multiUpdateReport->Colors[i].Green;
-							DevContext->KeyStates[DevContext->CurrentLampID].b = multiUpdateReport->Colors[i].Blue;
+						if (LampID < DevContext->RGBLedInfo->LampCount) {
+							DevContext->KeyStates[LampID].r = multiUpdateReport->Colors[i].Red;
+							DevContext->KeyStates[LampID].g = multiUpdateReport->Colors[i].Green;
+							DevContext->KeyStates[LampID].b = multiUpdateReport->Colors[i].Blue;
 						}
 					}
 
 #if NOTVM
 					if (DevContext->SupportsRGB) {
-						size_t outLen = sizeof(ec_params_rgbkbd_set_color) + EC_RGBKBD_MAX_KEY_COUNT * sizeof(rgb_s);
+						int keysUpdate = min(EC_RGBKBD_MAX_KEY_COUNT, DevContext->RGBLedInfo->LampCount);
+						size_t outLen = sizeof(ec_params_rgbkbd_set_color) + keysUpdate * sizeof(rgb_s);
 						ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color *)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
 						if (setColorParams) {
 							setColorParams->start_key = 1;
-							setColorParams->length = EC_RGBKBD_MAX_KEY_COUNT;
-							RtlCopyMemory(&setColorParams->color, &DevContext->KeyStates, sizeof(DevContext->KeyStates));
+							setColorParams->length = keysUpdate;
+							RtlCopyMemory(setColorParams->color, &DevContext->KeyStates, sizeof(DevContext->KeyStates));
 							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
 								NULL, 0);
-							DbgPrint("Set Multi States: 0x%x\n", cmdSts);
+							CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+								"Set Multi States: 0x%x\n", cmdSts);
 							ExFreePool(setColorParams);
 						}
 					}
@@ -1361,30 +1371,30 @@ CrosKBLightSetFeature(
 			case REPORT_ID_LIGHTING_LAMP_RANGE_UPDATE: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayRangeUpdateReport)) {
 					LampArrayRangeUpdateReport* rangeUpdateReport = (LampArrayRangeUpdateReport*)transferPacket->reportBuffer;
-					DbgPrint("Range Update. Start: %d, End: %d, Color: %d %d %d %d\n",
+					CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+						"Range Update. Start: %d, End: %d, Color: %d %d %d %d\n",
 						rangeUpdateReport->LampIdStart, rangeUpdateReport->LampIdEnd,
 						rangeUpdateReport->Color.Red, rangeUpdateReport->Color.Green, rangeUpdateReport->Color.Blue, rangeUpdateReport->Color.Intensity);
 
-					if (DevContext->CurrentLampID < EC_RGBKBD_MAX_KEY_COUNT) {
-						DevContext->KeyStates[DevContext->CurrentLampID].r = rangeUpdateReport->Color.Red;
-						DevContext->KeyStates[DevContext->CurrentLampID].g = rangeUpdateReport->Color.Green;
-						DevContext->KeyStates[DevContext->CurrentLampID].b = rangeUpdateReport->Color.Blue;
+					for (int i = rangeUpdateReport->LampIdStart; i <= min(rangeUpdateReport->LampIdEnd, DevContext->RGBLedInfo->LampCount - 1); i++) {
+						DevContext->KeyStates[i].r = rangeUpdateReport->Color.Red;
+						DevContext->KeyStates[i].g = rangeUpdateReport->Color.Green;
+						DevContext->KeyStates[i].b = rangeUpdateReport->Color.Blue;
 					}
 
 #if NOTVM
 					if (DevContext->SupportsRGB) {
-						ec_params_rgbkbd_set_color *setColorParams = (ec_params_rgbkbd_set_color *)ExAllocatePoolZero(
-							NonPagedPool, sizeof(ec_params_rgbkbd_set_color) + sizeof(rgb_s), CROSKBLIGHT_POOL_TAG);
+						int keysUpdate = min(EC_RGBKBD_MAX_KEY_COUNT, DevContext->RGBLedInfo->LampCount);
+						size_t outLen = sizeof(ec_params_rgbkbd_set_color) + keysUpdate * sizeof(rgb_s);
+						ec_params_rgbkbd_set_color* setColorParams = (ec_params_rgbkbd_set_color*)ExAllocatePoolZero(NonPagedPool, outLen, CROSKBLIGHT_POOL_TAG);
 						if (setColorParams) {
-							setColorParams->start_key = DevContext->CurrentLampID + 1;
-							setColorParams->length = 1;
-							setColorParams->color->r = rangeUpdateReport->Color.Red;
-							setColorParams->color->g = rangeUpdateReport->Color.Green;
-							setColorParams->color->b = rangeUpdateReport->Color.Blue;
-
-							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, sizeof(ec_params_rgbkbd_set_color) + sizeof(rgb_s),
+							setColorParams->start_key = 1;
+							setColorParams->length = keysUpdate;
+							RtlCopyMemory(setColorParams->color, &DevContext->KeyStates, sizeof(DevContext->KeyStates));
+							NTSTATUS cmdSts = send_ec_command(DevContext, EC_CMD_RGBKBD_SET_COLOR, 0, (UINT8*)setColorParams, outLen,
 								NULL, 0);
-							DbgPrint("Set Lamp Range: 0x%x\n", cmdSts);
+							CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+								"Set Multi States: 0x%x\n", cmdSts);
 							ExFreePool(setColorParams);
 						}
 					}
@@ -1397,7 +1407,8 @@ CrosKBLightSetFeature(
 			}case REPORT_ID_LIGHTING_LAMP_ARRAY_CONTROL: {
 				if (transferPacket->reportBufferLen >= sizeof(LampArrayControlReport)) {
 					LampArrayControlReport* controlReport = (LampArrayControlReport*)transferPacket->reportBuffer;
-					DbgPrint("Autonomous Mode? %d\n", controlReport->AutonomousMode);
+					CrosKBLightPrint(DEBUG_LEVEL_INFO, DBG_IOCTL,
+						"Autonomous Mode? %d\n", controlReport->AutonomousMode);
 
 #if NOTVM
 					if (DevContext->SupportsRGB) {
@@ -1499,17 +1510,17 @@ CrosKBLightGetFeature(
 					}
 
 					responseReport->LampId = lampID;
-					responseReport->LampPosition.x = DevContext->RGBLedInfo->Keys[0].Pos_X;
-					responseReport->LampPosition.y = DevContext->RGBLedInfo->Keys[0].Pos_Y;
-					responseReport->LampPosition.z = DevContext->RGBLedInfo->Keys[0].Pos_Z;
+					responseReport->LampPosition.x = DevContext->RGBLedInfo->Keys[lampID].Pos_X;
+					responseReport->LampPosition.y = DevContext->RGBLedInfo->Keys[lampID].Pos_Y;
+					responseReport->LampPosition.z = DevContext->RGBLedInfo->Keys[lampID].Pos_Z;
 					responseReport->UpdateLatency = 1000; //10 ms
 					responseReport->LampPurposes = 1; //Keyboard
-					responseReport->RedLevelCount = DevContext->RGBLedInfo->Keys[0].RedCount;
-					responseReport->GreenLevelCount = DevContext->RGBLedInfo->Keys[0].GreenCount;
-					responseReport->BlueLevelCount = DevContext->RGBLedInfo->Keys[0].BlueCount;
-					responseReport->IntensityLevelCount = DevContext->RGBLedInfo->Keys[0].IntensityCount;
-					responseReport->IsProgrammable = DevContext->RGBLedInfo->Keys[0].IsProgrammable;
-					responseReport->InputBinding = DevContext->RGBLedInfo->Keys[0].InputBinding;
+					responseReport->RedLevelCount = DevContext->RGBLedInfo->Keys[lampID].RedCount;
+					responseReport->GreenLevelCount = DevContext->RGBLedInfo->Keys[lampID].GreenCount;
+					responseReport->BlueLevelCount = DevContext->RGBLedInfo->Keys[lampID].BlueCount;
+					responseReport->IntensityLevelCount = DevContext->RGBLedInfo->Keys[lampID].IntensityCount;
+					responseReport->IsProgrammable = DevContext->RGBLedInfo->Keys[lampID].IsProgrammable;
+					responseReport->InputBinding = DevContext->RGBLedInfo->Keys[lampID].InputBinding;
 					break;
 				}
 			}
