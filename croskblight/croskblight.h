@@ -125,6 +125,8 @@ typedef struct _CROSKBLIGHT_CONTEXT
 
 	WDFQUEUE ReportQueue;
 
+	WDFQUEUE IdleQueue;
+
 	PVOID CrosEcBusContext;
 
 	PCROSEC_CMD_XFER_STATUS CrosEcCmdXferStatus;
@@ -142,6 +144,20 @@ typedef struct _CROSKBLIGHT_CONTEXT
 } CROSKBLIGHT_CONTEXT, *PCROSKBLIGHT_CONTEXT;
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(CROSKBLIGHT_CONTEXT, GetDeviceContext)
+
+//
+// Power Idle Workitem context
+// 
+typedef struct _IDLE_WORKITEM_CONTEXT
+{
+	// Handle to a WDF device object
+	WDFDEVICE FxDevice;
+
+	// Handle to a WDF request object
+	WDFREQUEST FxRequest;
+
+} IDLE_WORKITEM_CONTEXT, * PIDLE_WORKITEM_CONTEXT;
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(IDLE_WORKITEM_CONTEXT, GetIdleWorkItemContext)
 
 //
 // Function definitions
@@ -218,6 +234,11 @@ PCHAR
 DbgHidInternalIoctlString(
 	IN ULONG        IoControlCode
 	);
+
+VOID
+CrosKBLightCompleteIdleIrp(
+	IN PCROSKBLIGHT_CONTEXT FxDeviceContext
+);
 
 #define KEYSPAGE 40
 
