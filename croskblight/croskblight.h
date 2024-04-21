@@ -127,9 +127,6 @@ typedef struct _CROSKBLIGHT_CONTEXT
 
 	PVOID CrosEcBusContext;
 
-	//S0IX Notify
-	ACPI_INTERFACE_STANDARD2 S0ixNotifyAcpiInterface;
-
 	PCROSEC_CMD_XFER_STATUS CrosEcCmdXferStatus;
 
 	WDFIOTARGET busIoTarget;

@@ -4,11 +4,6 @@
 #include <ntstrsafe.h>
 #define NOTVM 1
 
-VOID
-CrosKBLightS0ixNotifyCallback(
-	PCROSKBLIGHT_CONTEXT pDevice,
-	ULONG NotifyCode);
-
 static ULONG CrosKBLightDebugLevel = 100;
 static ULONG CrosKBLightDebugCatagories = DBG_INIT || DBG_PNP || DBG_IOCTL;
 
@@ -407,25 +402,6 @@ Status
 		DbgPrint("RGB Supported! Keys: %d\n", pDevice->RGBLedInfo->LampCount);
 	}
 
-	status = WdfFdoQueryForInterface(FxDevice,
-		&GUID_ACPI_INTERFACE_STANDARD2,
-		(PINTERFACE)&pDevice->S0ixNotifyAcpiInterface,
-		sizeof(ACPI_INTERFACE_STANDARD2),
-		1,
-		NULL);
-
-	if (!NT_SUCCESS(status)) {
-		return status;
-	}
-
-	status = pDevice->S0ixNotifyAcpiInterface.RegisterForDeviceNotifications(
-		pDevice->S0ixNotifyAcpiInterface.Context,
-		(PDEVICE_NOTIFY_CALLBACK2)CrosKBLightS0ixNotifyCallback,
-		pDevice);
-	if (!NT_SUCCESS(status)) {
-		return status;
-	}
-
 	return status;
 }
 
@@ -454,10 +430,6 @@ OnReleaseHardware(
 	NTSTATUS status = STATUS_SUCCESS;
 
 	UNREFERENCED_PARAMETER(FxResourcesTranslated);
-
-	if (pDevice->S0ixNotifyAcpiInterface.Context) { //Used for S0ix notifications
-		pDevice->S0ixNotifyAcpiInterface.UnregisterForDeviceNotifications(pDevice->S0ixNotifyAcpiInterface.Context);
-	}
 
 	if (pDevice->RGBLedInfo) {
 		ExFreePool(pDevice->RGBLedInfo);
@@ -533,18 +505,6 @@ OnD0Exit(
 	}
 
 	return STATUS_SUCCESS;
-}
-
-VOID
-CrosKBLightS0ixNotifyCallback(
-	PCROSKBLIGHT_CONTEXT pDevice,
-	ULONG NotifyCode) {
-	if (NotifyCode) {
-		OnD0Exit(pDevice->FxDevice, WdfPowerDeviceD3);
-	}
-	else {
-		OnD0Entry(pDevice->FxDevice, WdfPowerDeviceD3);
-	}
 }
 
 /*static void update_brightness(PCROSKBLIGHT_CONTEXT pDevice, BYTE brightness) {
