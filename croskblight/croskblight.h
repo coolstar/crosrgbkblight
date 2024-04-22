@@ -56,8 +56,26 @@ EVT_WDF_OBJECT_CONTEXT_CLEANUP  OnDriverCleanup;
 typedef UCHAR HID_REPORT_DESCRIPTOR, *PHID_REPORT_DESCRIPTOR;
 
 #ifdef DESCRIPTOR_DEF
-HID_REPORT_DESCRIPTOR DefaultReportDescriptor[] = {
+HID_REPORT_DESCRIPTOR DefaultReportDescriptorRGB[] = {
     TUD_HID_REPORT_DESC_LIGHTING(REPORTID_RGBKBLIGHT)
+};
+
+HID_REPORT_DESCRIPTOR DefaultReportDescriptorLegacy[] = {
+	0x06, 0x00, 0xff,                    // USAGE_PAGE (Vendor Defined Page 1)
+	0x09, 0x01,                          // USAGE (Vendor Usage 1)
+	0xa1, 0x01,                          // COLLECTION (Application)
+	0x85, REPORTID_KBLIGHT,              //   REPORT_ID (Keyboard Backlight)
+	0x15, 0x00,                          //   LOGICAL_MINIMUM (0)
+	0x26, 0xff, 0x00,                    //   LOGICAL_MAXIMUM (256)
+	0x75, 0x08,                          //   REPORT_SIZE  (8)   - bits
+	0x95, 0x01,                          //   REPORT_COUNT (1)  - Bytes
+	0x09, 0x02,                          //   USAGE (Vendor Usage 1)
+	0x91, 0x02,                          //   OUTPUT (Data,Var,Abs)
+	0x09, 0x03,                          //   USAGE (Vendor Usage 2)
+	0x91, 0x02,                          //   OUTPUT (Data,Var,Abs)
+	0x09, 0x02,                          //   USAGE (Vendor Usage 1)
+	0x81, 0x02,                          //   INPUT (Data,Var,Abs)
+	0xc0,                                // END_COLLECTION
 };
 
 
@@ -67,14 +85,24 @@ HID_REPORT_DESCRIPTOR DefaultReportDescriptor[] = {
 // of report descriptor is currently the size of DefaultReportDescriptor.
 //
 
-CONST HID_DESCRIPTOR DefaultHidDescriptor = {
+CONST HID_DESCRIPTOR DefaultHidDescriptorRGB = {
 	0x09,   // length of HID descriptor
 	0x21,   // descriptor type == HID  0x21
 	0x0100, // hid spec release
 	0x00,   // country code == Not Specified
 	0x01,   // number of HID class descriptors
 	{ 0x22,   // descriptor type 
-	sizeof(DefaultReportDescriptor) }  // total length of report descriptor
+	sizeof(DefaultReportDescriptorRGB) }  // total length of report descriptor
+};
+
+CONST HID_DESCRIPTOR DefaultHidDescriptorLegacy = {
+	0x09,   // length of HID descriptor
+	0x21,   // descriptor type == HID  0x21
+	0x0100, // hid spec release
+	0x00,   // country code == Not Specified
+	0x01,   // number of HID class descriptors
+	{ 0x22,   // descriptor type 
+	sizeof(DefaultReportDescriptorLegacy) }  // total length of report descriptor
 };
 #endif
 
@@ -133,9 +161,11 @@ typedef struct _CROSKBLIGHT_CONTEXT
 
 	WDFIOTARGET busIoTarget;
 
-	UINT16 CurrentLampID;
+	UINT8 currentBrightness;
 
 	BOOLEAN SupportsRGB;
+
+	UINT16 CurrentLampID;
 
 	CROSKBLIGHT_INFO* RGBLedInfo;
 

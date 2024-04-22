@@ -14,6 +14,7 @@
 // These are the report ids
 //
 
+#define REPORTID_KBLIGHT       0x01
 #define REPORTID_RGBKBLIGHT       0x02
 
 enum {
@@ -27,6 +28,26 @@ enum {
 };
 
 #include <pshpack1.h>
+
+typedef struct _CROSKBLIGHT_GETLIGHT_REPORT
+{
+
+	BYTE        ReportID;
+
+	BYTE		Brightness;
+
+} CrosKBLightGetLightReport;
+
+typedef struct _CROSKBLIGHT_SETTINGS_REPORT
+{
+
+	BYTE        ReportID;
+
+	BYTE		SetBrightness;
+
+	BYTE		Brightness;
+
+} CrosKBLightSettingsReport;
 
 typedef struct _LAMPCOLOR
 {

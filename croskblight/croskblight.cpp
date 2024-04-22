@@ -246,6 +246,27 @@ BOOLEAN cros_ec_cmd_version_supported(PCROSKBLIGHT_CONTEXT pDevice, int cmd, int
 }
 
 NTSTATUS
+CrosKBLightGetBacklight(
+	_In_ PCROSKBLIGHT_CONTEXT pDevice,
+	UINT8* PBacklight
+)
+{
+	struct ec_response_pwm_get_keyboard_backlight backlightParams;
+	NTSTATUS status = send_ec_command(pDevice, EC_CMD_PWM_GET_KEYBOARD_BACKLIGHT, 0, NULL, 0, (UINT8*)&backlightParams, sizeof(struct ec_response_pwm_get_keyboard_backlight));
+	if (!NT_SUCCESS(status))
+		return status;
+	if (PBacklight) {
+		if (backlightParams.enabled) {
+			*PBacklight = backlightParams.percent;
+		}
+		else {
+			*PBacklight = 0;
+		}
+	}
+	return status;
+}
+
+NTSTATUS
 CrosKBLightSetBacklight(
 	_In_ PCROSKBLIGHT_CONTEXT pDevice,
 	UINT8 Backlight
@@ -267,6 +288,11 @@ BOOLEAN validateAndLoad(
 
 	CROSKBLIGHT_INFO* info = (CROSKBLIGHT_INFO*)fw->data;
 	UINT32 LampCount = info->LampCount;
+	if (LampCount < 1) {
+		DbgPrint("RGB Keyboard must have at least 1 Lamp!\n");
+		return FALSE;
+	}
+
 	size_t sz = sizeof(CROSKBLIGHT_INFO) + LampCount * sizeof(CROSKBLIGHT_KEY_INFO);
 	if (fw->size < sz) {
 		DbgPrint("Size is too small: %lld (expected %lld)\n", fw->size, sz);
@@ -310,6 +336,8 @@ Status
 	UNREFERENCED_PARAMETER(FxResourcesRaw);
 	UNREFERENCED_PARAMETER(FxResourcesTranslated);
 
+	pDevice->RGBLedInfo = NULL;
+
 #if NOTVM
 	status = ConnectToEc(FxDevice);
 	if (!NT_SUCCESS(status)) {
@@ -317,9 +345,6 @@ Status
 	}
 
 	(*pDevice->CrosEcCmdXferStatus)(pDevice->CrosEcBusContext, NULL);
-#endif
-
-	pDevice->RGBLedInfo = NULL;
 
 	BOOLEAN supportsRGBKBD = FALSE;
 	if (!cros_ec_cmd_version_supported(pDevice, EC_CMD_RGBKBD, 0)) {
@@ -371,6 +396,16 @@ Status
 			}
 		}
 	}
+	#endif
+
+	firmware* fw = NULL;
+	NTSTATUS checkForceRGB = request_firmware(&fw, L"\\SystemRoot\\system32\\DRIVERS\\croskbrgb_forcergb.txt");
+	if (fw) {
+		free_firmware(fw);
+	}
+	if (NT_SUCCESS(checkForceRGB)) {
+		DbgPrint("Force enabling RGB on non-RGB keyboard as grayscale!\n");
+	}
 
 	if (!pDevice->RGBLedInfo){
 		UINT8 keyCount = 1;
@@ -394,11 +429,15 @@ Status
 		pDevice->RGBLedInfo->Keys[0].IsProgrammable = 0;
 	}
 
-	if (pDevice->RGBLedInfo->LampCount == 0 && pDevice->RGBLedInfo->Keys[0].IsProgrammable == 0) {
+	if (pDevice->RGBLedInfo->LampCount == 1 && pDevice->RGBLedInfo->Keys[0].IsProgrammable == 0 && !NT_SUCCESS(checkForceRGB)) {
 		pDevice->SupportsRGB = FALSE;
+#if NOTVM
+		CrosKBLightGetBacklight(pDevice, &pDevice->currentBrightness);
+#endif
 	}
 	else {
 		pDevice->SupportsRGB = TRUE;
+		pDevice->currentBrightness = 100;
 		DbgPrint("RGB Supported! Keys: %d\n", pDevice->RGBLedInfo->LampCount);
 	}
 
@@ -467,7 +506,7 @@ OnD0Entry(
 	NTSTATUS status = STATUS_SUCCESS;
 
 #if NOTVM
-	CrosKBLightSetBacklight(pDevice, 100);
+	CrosKBLightSetBacklight(pDevice, pDevice->currentBrightness);
 #endif
 
 	CrosKBLightCompleteIdleIrp(pDevice);
@@ -509,14 +548,14 @@ OnD0Exit(
 	return STATUS_SUCCESS;
 }
 
-/*static void update_brightness(PCROSKBLIGHT_CONTEXT pDevice, BYTE brightness) {
+static void update_brightness(PCROSKBLIGHT_CONTEXT pDevice, BYTE brightness) {
 	_CROSKBLIGHT_GETLIGHT_REPORT report;
 	report.ReportID = REPORTID_KBLIGHT;
 	report.Brightness = brightness;
 
 	size_t bytesWritten;
 	CrosKBLightProcessVendorReport(pDevice, &report, sizeof(report), &bytesWritten);
-}*/
+}
 
 NTSTATUS
 CrosKBLightEvtDeviceAdd(
@@ -1046,6 +1085,7 @@ CrosKBLightGetHidDescriptor(
 	NTSTATUS            status = STATUS_SUCCESS;
 	size_t              bytesToCopy = 0;
 	WDFMEMORY           memory;
+	PCROSKBLIGHT_CONTEXT devContext = GetDeviceContext(Device);
 
 	UNREFERENCED_PARAMETER(Device);
 
@@ -1074,7 +1114,12 @@ CrosKBLightGetHidDescriptor(
 	//
 	// Use hardcoded "HID Descriptor" 
 	//
-	bytesToCopy = DefaultHidDescriptor.bLength;
+	if (devContext->SupportsRGB) {
+		bytesToCopy = DefaultHidDescriptorRGB.bLength;
+	}
+	else {
+		bytesToCopy = DefaultHidDescriptorLegacy.bLength;
+	}
 
 	if (bytesToCopy == 0)
 	{
@@ -1086,10 +1131,18 @@ CrosKBLightGetHidDescriptor(
 		return status;
 	}
 
-	status = WdfMemoryCopyFromBuffer(memory,
-		0, // Offset
-		(PVOID)&DefaultHidDescriptor,
-		bytesToCopy);
+	if (devContext->SupportsRGB) {
+		status = WdfMemoryCopyFromBuffer(memory,
+			0, // Offset
+			(PVOID)&DefaultHidDescriptorRGB,
+			bytesToCopy);
+	}
+	else {
+		status = WdfMemoryCopyFromBuffer(memory,
+			0, // Offset
+			(PVOID)&DefaultHidDescriptorLegacy,
+			bytesToCopy);
+	}
 
 	if (!NT_SUCCESS(status))
 	{
@@ -1119,6 +1172,7 @@ CrosKBLightGetReportDescriptor(
 	NTSTATUS            status = STATUS_SUCCESS;
 	ULONG_PTR           bytesToCopy;
 	WDFMEMORY           memory;
+	PCROSKBLIGHT_CONTEXT devContext = GetDeviceContext(Device);
 
 	UNREFERENCED_PARAMETER(Device);
 
@@ -1146,7 +1200,12 @@ CrosKBLightGetReportDescriptor(
 	//
 	// Use hardcoded Report descriptor
 	//
-	bytesToCopy = DefaultHidDescriptor.DescriptorList[0].wReportLength;
+	if (devContext->SupportsRGB) {
+		bytesToCopy = DefaultHidDescriptorRGB.DescriptorList[0].wReportLength;
+	}
+	else {
+		bytesToCopy = DefaultHidDescriptorLegacy.DescriptorList[0].wReportLength;
+	}
 
 	if (bytesToCopy == 0)
 	{
@@ -1158,10 +1217,18 @@ CrosKBLightGetReportDescriptor(
 		return status;
 	}
 
-	status = WdfMemoryCopyFromBuffer(memory,
-		0,
-		(PVOID)DefaultReportDescriptor,
-		bytesToCopy);
+	if (devContext->SupportsRGB) {
+		status = WdfMemoryCopyFromBuffer(memory,
+			0,
+			(PVOID)DefaultReportDescriptorRGB,
+			bytesToCopy);
+	}
+	else {
+		status = WdfMemoryCopyFromBuffer(memory,
+			0,
+			(PVOID)DefaultReportDescriptorLegacy,
+			bytesToCopy);
+	}
 	if (!NT_SUCCESS(status))
 	{
 		CrosKBLightPrint(DEBUG_LEVEL_ERROR, DBG_IOCTL,
@@ -1352,6 +1419,24 @@ CrosKBLightWriteReport(
 
 			switch (transferPacket->reportId)
 			{
+			case REPORTID_KBLIGHT: {
+				CrosKBLightSettingsReport* pReport = (CrosKBLightSettingsReport*)transferPacket->reportBuffer;
+
+				int reg = pReport->SetBrightness;
+				int val = pReport->Brightness;
+
+				if (reg == 0) {
+					int brightness = DevContext->currentBrightness;
+					update_brightness(DevContext, brightness);
+				}
+				else if (reg == 1) {
+					DevContext->currentBrightness = val;
+#if NOTVM
+					CrosKBLightSetBacklight(DevContext, DevContext->currentBrightness);
+#endif
+				}
+				break;
+			}
 			default:
 				CrosKBLightPrint(DEBUG_LEVEL_ERROR, DBG_IOCTL,
 					"CrosKBLightWriteReport Unhandled report type %d\n", transferPacket->reportId);
